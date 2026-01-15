@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Binance Lakehouse Pro</title>
+    <style>
+        body { margin: 0; background: #0e1117; color: #fff; font-family: sans-serif; overflow: hidden; }
+        .container { display: flex; height: 100vh; }
+        .chart-area { flex: 3; display: flex; flex-direction: column; border-right: 1px solid #333; }
+        .header { height: 60px; padding: 0 20px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; background: #161a25; }
+        .symbol-name { font-size: 1.4rem; font-weight: bold; color: #F0B90B; }
+        .toolbar { display: flex; gap: 5px; }
+        .tf-btn { background: #0e1117; border: 1px solid #333; color: #888; padding: 5px 10px; cursor: pointer; }
+        .tf-btn.active { background: #2962FF; color: white; border-color: #2962FF; }
+        .price-display { font-size: 1.5rem; font-weight: bold; font-family: monospace; }
+        .text-green { color: #00ffcc; } .text-red { color: #ff3366; }
+        #chart { flex: 1; width: 100%; position: relative; }
+        .sidebar { flex: 1; background: #161a25; border-left: 1px solid #333; display: flex; flex-direction: column; }
+        .chat-header { padding: 15px; border-bottom: 1px solid #333; font-weight: bold; color: #F0B90B; text-align: center; }
+        .chat-body { flex: 1; padding: 15px; overflow-y: auto; font-size: 0.9rem; display: flex; flex-direction: column; gap: 10px; }
+        .chat-input { margin: 15px; padding: 10px; background: #0e1117; border: 1px solid #333; color: white; border-radius: 4px; }
+        .msg-user { align-self: flex-end; background: #2962FF; padding: 8px 12px; border-radius: 12px 12px 0 12px; max-width: 80%; }
+        .msg-ai { align-self: flex-start; background: #2a2e39; padding: 8px 12px; border-radius: 12px 12px 12px 0; max-width: 80%; color: #00ffcc; line-height: 1.4; }
+    </style>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="chart-area">
+            <div class="header">
+                <div class="symbol-name">BTC/USDT</div>
+                <div class="toolbar">
+                    <button class="tf-btn active" onclick="changeInterval('15m')">15m</button>
+                    <button class="tf-btn" onclick="changeInterval('1h')">1H</button>
+                    <button class="tf-btn" onclick="changeInterval('4h')">4H</button>
+                    <button class="tf-btn" onclick="changeInterval('1d')">1D</button>
+                </div>
+                <div id="price" class="price-display">--</div>
+            </div>
+            <div id="chart"></div>
+        </div>
+        <div class="sidebar">
+            <div class="chat-header">✨ Gemini AI Analyst</div>
+            <div class="chat-body" id="chat-content">
+                <div class="msg-ai">Xin chào! Tôi đang theo dõi giá BTC Realtime. Bạn cần hỏi gì?</div>
+            </div>
+            <input type="text" class="chat-input" placeholder="Ví dụ: Xu hướng giá thế nào?..." onkeypress="handleChat(event)">
+        </div>
+    </div>
+
+    <script>
+        let chart, series, lastCandle = null, currentInterval = '15m'; 
+        const INTERVAL_SECONDS = {'15m': 900, '1h': 3600, '4h': 14400, '1d': 86400};
+
+        function initChart() {
+            chart = LightweightCharts.createChart(document.getElementById('chart'), {
+                layout: { background: { color: '#0e1117' }, textColor: '#ccc' },
+                grid: { vertLines: { color: '#1f1f1f' }, horzLines: { color: '#1f1f1f' } },
+                timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#333', rightOffset: 5 },
+                rightPriceScale: { borderColor: '#333' },
+            });
+            series = chart.addCandlestickSeries({ upColor: '#00C087', downColor: '#F6465D', borderVisible: false });
+            window.onresize = () => chart.applyOptions({ width: document.querySelector('.chart-area').clientWidth, height: document.querySelector('.chart-area').clientHeight - 60 });
+        }
+
+        async function loadData(interval) {
+            try {
+                const res = await fetch(`http://localhost:8000/api/history/BTCUSDT?interval=${interval}`);
+                const data = await res.json();
+                if (data.length > 0) {
+                    data.sort((a,b) => a.time - b.time);
+                    series.setData(data);
+                    lastCandle = data[data.length - 1];
+                    updatePrice(lastCandle);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function fetchRealtime() {
+            try {
+                const res = await fetch('http://localhost:8000/api/realtime/BTCUSDT');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.length === 0 || !lastCandle) return;
+
+                const tick = data[0];
+                const price = tick.close;
+                const intervalSec = INTERVAL_SECONDS[currentInterval];
+                const candleTime = Math.floor(tick.time / intervalSec) * intervalSec;
+
+                if (candleTime === lastCandle.time) {
+                    lastCandle.close = price;
+                    lastCandle.high = Math.max(lastCandle.high, price);
+                    lastCandle.low = Math.min(lastCandle.low, price);
+                    series.update(lastCandle);
+                }
+                updatePrice({ close: price, open: lastCandle.open });
+            } catch (e) { }
+        }
+
+        function updatePrice(c) {
+            const el = document.getElementById('price');
+            el.innerText = `$${c.close.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            el.className = `price-display ${c.close >= c.open ? 'text-green' : 'text-red'}`;
+            document.title = el.innerText;
+        }
+
+        function changeInterval(tf) {
+            document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            currentInterval = tf;
+            loadData(tf);
+        }
+
+        // --- LOGIC CHAT AI MỚI ---
+        async function handleChat(e) {
+            if (e.key === 'Enter') {
+                const input = e.target;
+                const txt = input.value;
+                if (!txt) return;
+
+                const box = document.getElementById('chat-content');
+                box.innerHTML += `<div class="msg-user">${txt}</div>`;
+                input.value = 'AI đang suy nghĩ...';
+                input.disabled = true;
+
+                try {
+                    // Gọi API Backend (Nơi đã gắn Gemini)
+                    const res = await fetch('http://localhost:8000/api/chat', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({message: txt})
+                    });
+                    const data = await res.json();
+                    box.innerHTML += `<div class="msg-ai">${data.response}</div>`;
+                } catch (err) {
+                    box.innerHTML += `<div class="msg-ai" style="color:#ff3366">Lỗi kết nối AI.</div>`;
+                }
+
+                input.value = '';
+                input.disabled = false;
+                input.focus();
+                box.scrollTop = box.scrollHeight;
+            }
+        }
+
+        initChart();
+        loadData('15m');
+        setInterval(fetchRealtime, 1000);
+    </script>
+</body>
+</html>
