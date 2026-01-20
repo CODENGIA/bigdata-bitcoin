@@ -1,0 +1,20 @@
+# 1. Bỏ qua file chứa Key nhạy cảm
+api/check_model.py
+.env
+
+# 2. Bỏ qua các file biên dịch của Python (Rác)
+__pycache__/
+*.pyc
+
+# 3. QUAN TRỌNG: Bỏ qua thư mục Data (Nặng GB, không được push lên git)
+data/
+data/kafka_data/
+data/minio_data/
+data/zookeeper_data/
+data/zookeeper_log/
+
+# 4. Các file hệ thống ảo (nếu có)
+.venv/
+venv/
+.idea/
+.vscode/

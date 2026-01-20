@@ -1,0 +1,153 @@
+# FILE: 02-apps.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crypto-ingestion
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crypto-ingestion
+  template:
+    metadata:
+      labels:
+        app: crypto-ingestion
+    spec:
+      containers:
+      - name: crypto-ingestion
+        image: crypto-ingestion:latest
+        imagePullPolicy: Never
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-broker:9092"
+        - name: MINIO_ENDPOINT
+          value: "http://minio:9000"
+        # THÊM: Cấp quyền MinIO cho Ingestion (để nó tạo file init)
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-pass
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crypto-spark
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crypto-spark
+  template:
+    metadata:
+      labels:
+        app: crypto-spark
+    spec:
+      containers:
+      - name: crypto-spark
+        image: crypto-spark:latest
+        imagePullPolicy: Never
+        command: [
+          "/opt/spark/bin/spark-submit",
+          "/opt/spark/work-dir/spark_processor.py"
+        ]
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-broker:9092"
+        - name: MINIO_ENDPOINT
+          value: "http://minio:9000"
+        # SỬA: Lấy Creds từ Secret
+        - name: ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-user
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-pass
+        resources:
+          requests:
+            memory: "1Gi"
+          limits:
+            memory: "2Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crypto-api
+spec:
+  type: NodePort
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30000
+  selector:
+    app: crypto-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crypto-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crypto-api
+  template:
+    metadata:
+      labels:
+        app: crypto-api
+    spec:
+      containers:
+      - name: crypto-api
+        image: crypto-api:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-broker:9092"
+        - name: MINIO_ENDPOINT
+          value: "http://minio:9000"
+        # SỬA: Giấu Google API Key
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: google-api-key
+        # THÊM: Cấp quyền MinIO cho API
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-pass
+
+        - name: PG_USER
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: pg-user
+        - name: PG_PASS
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: pg-pass
+        - name: PG_DB
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: pg-db

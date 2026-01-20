@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+kafka-python
+s3fs
+pandas
+google-genai
+psycopg2-binary
+sqlalchemy

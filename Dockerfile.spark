@@ -1,0 +1,22 @@
+FROM apache/spark:3.5.0
+USER root
+
+# Cài thư viện Python bổ trợ
+RUN pip install --no-cache-dir pandas s3fs psycopg2-binary kafka-python
+
+# Tải thủ công các thư viện Java cần thiết vào thư mục jars của Spark
+# 1. Spark SQL Kafka
+RUN curl -o /opt/spark/jars/spark-sql-kafka-0-10_2.12-3.5.0.jar https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.12/3.5.0/spark-sql-kafka-0-10_2.12-3.5.0.jar
+# 2. Kafka Clients
+RUN curl -o /opt/spark/jars/kafka-clients-3.5.1.jar https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.5.1/kafka-clients-3.5.1.jar
+# 3. Commons Pool (bắt buộc cho Kafka)
+RUN curl -o /opt/spark/jars/commons-pool2-2.11.1.jar https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar
+# 4. Spark Token Provider (bắt buộc cho Spark 3.x)
+RUN curl -o /opt/spark/jars/spark-token-provider-kafka-0-10_2.12-3.5.0.jar https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.12/3.5.0/spark-token-provider-kafka-0-10_2.12-3.5.0.jar
+# 5. Hadoop AWS (Kết nối MinIO)
+RUN curl -o /opt/spark/jars/hadoop-aws-3.3.4.jar https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar
+# 6. AWS Java SDK (Kết nối MinIO)
+RUN curl -o /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
+
+WORKDIR /opt/spark/work-dir
+COPY processing/spark_processor.py .

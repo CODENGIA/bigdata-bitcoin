@@ -1,0 +1,5 @@
+kafka-python
+requests
+pandas
+websocket-client
+s3fs

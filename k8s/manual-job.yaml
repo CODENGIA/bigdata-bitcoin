@@ -1,0 +1,15 @@
+﻿apiVersion: batch/v1
+kind: Job
+metadata:
+  name: manual-compaction-run-v2
+spec:
+  template:
+    spec:
+      containers:
+      - name: compactor
+        image: crypto-batch:v2
+        imagePullPolicy: Never
+        env:
+        - name: MINIO_ENDPOINT
+          value: "http://minio:9000"
+      restartPolicy: Never

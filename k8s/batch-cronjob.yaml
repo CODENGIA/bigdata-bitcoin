@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: crypto-batch-compactor
+spec:
+  schedule: "0 0 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: compactor
+            image: crypto-batch:v2
+            imagePullPolicy: Never
+            env:
+            - name: MINIO_ENDPOINT
+              value: "http://minio:9000"
+          restartPolicy: OnFailure

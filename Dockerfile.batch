@@ -1,0 +1,12 @@
+# Dockerfile.batch
+FROM python:3.9-slim
+WORKDIR /app
+
+# Cài các thư viện mà script compaction.py cần
+RUN pip install pandas s3fs pyarrow
+
+# Copy script vào (Lưu ý: Đảm bảo file trong thư mục batch tên là compaction.py)
+COPY batch/compaction.py .
+
+# Chạy script
+CMD ["python", "compaction.py"]
