@@ -1,17 +1,16 @@
 import os
 import sys
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, from_unixtime
+from pyspark.sql.functions import from_json, col
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, LongType
 
-# --- CẤU HÌNH ĐỘNG (Lấy từ K8s env hoặc mặc định) ---
-# Trong K8s, Kafka Service tên là 'kafka', cổng nội bộ là 9092
+# --- CẤU HÌNH ĐỘNG ---
 KAFKA_BOOTSTRAP = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092')
-# Trong K8s, MinIO Service tên là 'minio', cổng api là 9000
 MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'http://minio:9000')
 
-ACCESS_KEY = "admin"
-SECRET_KEY = "password123"
+# Credentials (trong môi trường thật nên dùng Secret, ở đây demo hardcode hoặc env)
+ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
+SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "password123")
 
 def main():
     print(f"--- SPARK CONFIG ---")
@@ -32,7 +31,7 @@ def main():
 
     spark.sparkContext.setLogLevel("WARN")
 
-    # Schema dữ liệu từ Kafka (Khớp với Producer)
+    # Schema dữ liệu từ Kafka
     schema = StructType([
         StructField("symbol", StringType(), True),
         StructField("price", DoubleType(), True),
@@ -60,23 +59,37 @@ def main():
         .select(from_json(col("value"), schema).alias("data")) \
         .select("data.*")
 
-    # Chuyển đổi event_time (ms) sang timestamp chuẩn
+    # Chuyển đổi event_time sang timestamp
     processed_df = parsed_df.withColumn("timestamp", (col("event_time") / 1000).cast("timestamp"))
 
     print("--- Writing to MinIO (Bronze Layer - Parquet) ---")
 
-    # 4. Ghi dữ liệu vào MinIO dưới dạng Parquet
-    # Lưu ý: Dùng Parquet thay vì Delta để tránh lỗi thiếu JAR trong K8s
-    query = processed_df.writeStream \
+    # 4. Ghi dữ liệu (Phân luồng theo Symbol)
+    
+    # --- LUỒNG 1: BTCUSDT ---
+    query_btc = processed_df.filter("symbol = 'BTCUSDT'") \
+        .writeStream \
         .outputMode("append") \
         .format("parquet") \
-        .option("checkpointLocation", "s3a://bronze/checkpoints/coin_data_parquet") \
+        .option("checkpointLocation", "s3a://bronze/checkpoints/btc") \
         .option("path", "s3a://bronze/coin_prices/history_BTCUSDT.parquet") \
         .trigger(processingTime='10 seconds') \
         .start()
 
-    print("--- Streaming is running... Waiting for data ---")
-    query.awaitTermination()
+    # --- LUỒNG 2: ETHUSDT ---
+    query_eth = processed_df.filter("symbol = 'ETHUSDT'") \
+        .writeStream \
+        .outputMode("append") \
+        .format("parquet") \
+        .option("checkpointLocation", "s3a://bronze/checkpoints/eth") \
+        .option("path", "s3a://bronze/coin_prices/history_ETHUSDT.parquet") \
+        .trigger(processingTime='10 seconds') \
+        .start()
+
+    print(">>> Spark Streaming đang chạy song song cho BTC và ETH...")
+    
+    # Đợi bất kỳ luồng nào kết thúc (hoặc lỗi)
+    spark.streams.awaitAnyTermination()
 
 if __name__ == "__main__":
     main()

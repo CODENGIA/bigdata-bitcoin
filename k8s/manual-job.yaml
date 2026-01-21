@@ -7,9 +7,25 @@ spec:
     spec:
       containers:
       - name: compactor
-        image: crypto-batch:v2
+        image: crypto-batch:latest
         imagePullPolicy: Never
         env:
+        # --- 1. Cấu hình MinIO ---
         - name: MINIO_ENDPOINT
           value: "http://minio:9000"
+        - name: MINIO_ACCESS_KEY
+          value: "admin"
+        - name: MINIO_SECRET_KEY
+          value: "password123"
+          
+        # --- 2. Cấu hình Postgres ---
+        - name: PG_USER
+          value: "user"
+        - name: PG_PASS
+          value: "password"
+        - name: PG_DB
+          value: "crypto_db"
+        - name: DATABASE_URL
+          value: "postgresql://user:password@postgres:5432/crypto_db"
       restartPolicy: Never
+  backoffLimit: 1

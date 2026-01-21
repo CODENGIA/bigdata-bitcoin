@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafdrop
+  labels:
+    app: kafdrop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafdrop
+  template:
+    metadata:
+      labels:
+        app: kafdrop
+    spec:
+      containers:
+      - name: kafdrop
+        image: obsidiandynamics/kafdrop:latest
+        ports:
+        - containerPort: 9000
+        env:
+        # SỬA Ở ĐÂY: Dùng đúng tên service "kafka-broker"
+        - name: KAFKA_BROKERCONNECT
+          value: "kafka-broker.default.svc.cluster.local:9092"
+        - name: JVM_OPTS
+          value: "-Xms32M -Xmx64M"
+        - name: SERVER_SERVLET_CONTEXT_PATH
+          value: "/"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafdrop
+  labels:
+    app: kafdrop
+spec:
+  ports:
+    - port: 9000
+      targetPort: 9000
+      nodePort: 30900
+  selector:
+    app: kafdrop
+  type: NodePort

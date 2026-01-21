@@ -1,8 +1,10 @@
 fastapi
 uvicorn
 kafka-python
-s3fs
 pandas
+s3fs
+pyarrow
 google-genai
-psycopg2-binary
+python-multipart
 sqlalchemy
+psycopg2-binary

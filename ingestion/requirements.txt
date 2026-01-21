@@ -1,5 +1,6 @@
 kafka-python
-requests
-pandas
 websocket-client
+pandas
+requests
 s3fs
+pyarrow

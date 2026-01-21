@@ -1,67 +1,103 @@
 import os
 import pandas as pd
 import s3fs
-import pyarrow.parquet as pq
+from sqlalchemy import create_engine, text
+import warnings
 
-# Config
+warnings.filterwarnings("ignore")
+
+# --- CONFIG ---
 MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'http://minio:9000')
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "password123")
+
+# Ưu tiên dùng DATABASE_URL nếu có, nếu không thì lắp ghép
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    PG_USER = os.getenv("PG_USER", "user") # Khớp với app-secrets
+    PG_PASS = os.getenv("PG_PASS", "password")
+    PG_DB = os.getenv("PG_DB", "crypto_db")
+    DB_HOST = "postgres" if os.getenv("KUBERNETES_SERVICE_HOST") else "localhost"
+    DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASS}@{DB_HOST}:5432/{PG_DB}"
+
 fs = s3fs.S3FileSystem(
-    key="admin", secret="password123",
+    key=MINIO_ACCESS_KEY, 
+    secret=MINIO_SECRET_KEY,
     client_kwargs={'endpoint_url': MINIO_ENDPOINT}
 )
 
-def compact_data():
-    symbol = "BTCUSDT"
-    # Lưu ý: S3FS glob không cần prefix s3:// khi dùng với object fs
+def process_symbol(symbol):
+    print(f"\n[START] Đang xử lý: {symbol}")
     bronze_path_glob = f"bronze/coin_prices/history_{symbol}.parquet/*.parquet"
     silver_path = f"s3://silver/coin_prices/{symbol}_clean.parquet"
 
-    print(">>> BẮT ĐẦU BATCH COMPACTION...")
-    
     try:
-        # 1. Liệt kê tất cả file parquet trong folder (Init + Part files)
         files = fs.glob(bronze_path_glob)
-        
         if not files:
-            print(f"Không tìm thấy file nào trong: {bronze_path_glob}")
+            print(f"   - Không tìm thấy dữ liệu Bronze.")
             return
 
-        print(f"Tìm thấy {len(files)} file thành phần. Đang đọc và gộp...")
-
-        # 2. Đọc từng file và gom vào list
         dfs = []
         for file_path in files:
             try:
-                # Mở từng file bằng fs.open để tránh lỗi đường dẫn
                 with fs.open(file_path, 'rb') as f:
                     dfs.append(pd.read_parquet(f))
-            except Exception as e:
-                print(f"Lỗi đọc file con {file_path}: {e}")
+            except: pass
 
-        if not dfs:
-            print("Không đọc được dữ liệu nào.")
-            return
+        if not dfs: return
 
-        # 3. Gộp thành 1 DataFrame to (Concat)
         df = pd.concat(dfs, ignore_index=True)
-        print(f"Tổng cộng: {len(df)} dòng dữ liệu thô.")
+        total_raw = len(df)
         
-        # 4. Xử lý dữ liệu (Batch Processing)
-        # - Loại bỏ trùng lặp (Deduplicate)
-        # - Sắp xếp theo thời gian
+        keep_cols = ['timestamp', 'price', 'volume', 'symbol']
+        available_cols = [c for c in keep_cols if c in df.columns]
+        df = df[available_cols]
+
         df_clean = df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+        total_clean = len(df_clean)
         
-        print(f"Sau khi làm sạch: {len(df_clean)} dòng.")
-        
-        # 5. Ghi sang Silver
         with fs.open(silver_path, 'wb') as f:
             df_clean.to_parquet(f)
-            
-        print(f"Đã ghi dữ liệu sạch sang: {silver_path}")
-        print("Batch Job hoàn tất. Dữ liệu Silver đã sẵn sàng cho LLM Training.")
-        
+        print(f"   - SILVER DONE: {total_raw} -> {total_clean} dòng.")
+
+        # --- GIAI ĐOẠN GOLD ---
+        if DATABASE_URL and not df_clean.empty:
+            try:
+                print("   - Đang tính toán KPI cho Gold Layer...")
+                last_date = df_clean['timestamp'].max().strftime('%Y-%m-%d')
+                
+                stats = {
+                    'date': last_date,
+                    'symbol': symbol,
+                    'high_price': float(df_clean['price'].max()),
+                    'low_price': float(df_clean['price'].min()),
+                    'avg_price': float(df_clean['price'].mean()),
+                    'volatility': float(df_clean['price'].std()),
+                    'updated_at': pd.Timestamp.now()
+                }
+                
+                df_stats = pd.DataFrame([stats])
+                engine = create_engine(DATABASE_URL)
+                
+                # SỬA LỖI: Sử dụng text() và bọc trong transaction
+                with engine.begin() as conn:
+                    delete_query = text("DELETE FROM daily_stats WHERE symbol = :sym AND date = :dt")
+                    conn.execute(delete_query, {"sym": symbol, "dt": last_date})
+                
+                df_stats.to_sql('daily_stats', engine, if_exists='append', index=False)
+                print(f"   - GOLD DONE: High ${stats['high_price']} | Low ${stats['low_price']}")
+                
+            except Exception as e:
+                print(f"   - Lỗi ghi Gold Layer: {e}")
+
     except Exception as e:
-        print(f"Lỗi Compaction: {e}")
+        print(f"Lỗi xử lý {symbol}: {e}")
+
+def compact_data_all():
+    print(">>> BẮT ĐẦU BATCH COMPACTION...")
+    for sym in ["BTCUSDT", "ETHUSDT"]:
+        process_symbol(sym)
+    print("\nBATCH JOB HOÀN TẤT TOÀN BỘ.")
 
 if __name__ == "__main__":
-    compact_data()
+    compact_data_all()
