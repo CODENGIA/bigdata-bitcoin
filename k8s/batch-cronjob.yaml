@@ -4,15 +4,43 @@ metadata:
   name: crypto-batch-compactor
 spec:
   schedule: "0 0 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       template:
         spec:
           containers:
           - name: compactor
-            image: crypto-batch:v2
+            image: crypto-batch:latest
             imagePullPolicy: Never
             env:
             - name: MINIO_ENDPOINT
               value: "http://minio:9000"
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: pg-user
+            - name: PG_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: pg-pass
+            - name: PG_DB
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: pg-db
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: minio-user
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: minio-pass
           restartPolicy: OnFailure
